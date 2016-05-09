@@ -1472,48 +1472,42 @@ var maybeUpdateRelease = function (options) {
     }
   }
 
-  var didPrintMessages = false;
-  var solutionReleaseVersion = _.find(releaseVersionsToTry, function (versionToTry) {
-    var releaseRecord = catalog.official.getReleaseVersion(
-      releaseTrack, versionToTry);
-    if (!releaseRecord) {
-      throw Error("missing release record?");
-    }
+  // var didPrintMessages = false;
+  // var solutionReleaseVersion = _.find(releaseVersionsToTry, function (versionToTry) {
+  //   // Reset the project context and pretend we're using the potential release.
+  //   projectContext.reset({ releaseForConstraints: releaseRecord });
+  //   var messages = buildmessage.capture(function () {
+  //     projectContext.resolveConstraints();
+  //   });
+  //   if (messages.hasMessages()) {
+  //     // To avoid overloading the user, we only print messages for the first
+  //     // release version we try (which should be the latest)
+  //     if (!didPrintMessages) {
+  //       Console.info(
+  //         "Update to release", releaseTrack + "@" + versionToTry,
+  //         "is impossible:");
+  //       Console.info(messages.formatMessages());
+  //       didPrintMessages = true;
+  //     }
+  //     // Nope, this release didn't work.
+  //     return false;
+  //   }
+  //
+  //   // Yay, it worked!
+  //   return true;
+  // });
 
-    // Reset the project context and pretend we're using the potential release.
-    projectContext.reset({ releaseForConstraints: releaseRecord });
-    var messages = buildmessage.capture(function () {
-      projectContext.resolveConstraints();
-    });
-    if (messages.hasMessages()) {
-      // To avoid overloading the user, we only print messages for the first
-      // release version we try (which should be the latest)
-      if (!didPrintMessages) {
-        Console.info(
-          "Update to release", releaseTrack + "@" + versionToTry,
-          "is impossible:");
-        Console.info(messages.formatMessages());
-        didPrintMessages = true;
-      }
-      // Nope, this release didn't work.
-      return false;
-    }
+  // var newerAvailable = false;
+  // if (! solutionReleaseVersion) {
+  //   Console.info(
+  //     "This project is at the latest release which is compatible with your " +
+  //     "current package constraints.");
+  //   return 0;
+  // } else if (solutionReleaseVersion !== releaseVersionsToTry[0]) {
+  //   newerAvailable = true;
+  // }
 
-    // Yay, it worked!
-    return true;
-  });
-
-  var newerAvailable = false;
-  if (! solutionReleaseVersion) {
-    Console.info(
-      "This project is at the latest release which is compatible with your " +
-      "current package constraints.");
-    return 0;
-  } else if (solutionReleaseVersion !== releaseVersionsToTry[0]) {
-    newerAvailable = true;
-  }
-
-  var solutionReleaseName = releaseTrack + '@' + solutionReleaseVersion;
+  var solutionReleaseName = releaseTrack + '@' + releaseVersionsToTry[0];
 
   // We could at this point springboard to solutionRelease (which is no newer
   // than the release we are currently running), but there's no super-clear
@@ -1523,6 +1517,14 @@ var maybeUpdateRelease = function (options) {
   // springboard at that time.
   var upgraders = require('../upgraders.js');
   var upgradersToRun = upgraders.upgradersToRun(projectContext);
+
+  var releaseRecord = catalog.offical.getReleaseVersion(releaseTrack, releaseVersionsToTry[0]);
+  console.log(releaseRecord);
+  projectContext.projectConstraintsFile.addConstraints(
+    _.map(releaseRecord.packages, function(version, packageName) {
+      return utils.parsePackageConstraint(packageName + '@' + version);
+    })
+  );
 
   // Download and build packages and write the new versions to .meteor/versions.
   // XXX It's a little weird that we do a full preparation for build
@@ -1649,27 +1651,9 @@ main.registerCommand({
   } else {
     upgradePackageNames = options.args;
   }
-  // We want to use the project's release for constraints even if we are
-  // currently running a newer release (eg if we ran 'meteor update --patch' and
-  // updated to an older patch release).  (If the project has release 'none'
-  // because this is just 'updating packages', this can be null. Also, if we're
-  // running from a checkout this should be null even if the file doesn't say
-  // 'none'.)
-  var releaseRecordForConstraints = null;
-  if (!files.inCheckout()
-      && projectContext.releaseFile.normalReleaseSpecified()) {
-    releaseRecordForConstraints = catalog.official.getReleaseVersion(
-      projectContext.releaseFile.releaseTrack,
-      projectContext.releaseFile.releaseVersion);
-    if (! releaseRecordForConstraints) {
-      throw Error("unknown release " +
-                  projectContext.releaseFile.displayReleaseName);
-    }
-  }
 
   // Try to resolve constraints, allowing the given packages to be upgraded.
   projectContext.reset({
-    releaseForConstraints: releaseRecordForConstraints,
     upgradePackageNames: upgradePackageNames,
     upgradeIndirectDepPatchVersions: upgradeIndirectDepPatchVersions
   });
@@ -1715,11 +1699,6 @@ main.registerCommand({
     var topLevelPkgSet = {}; // direct dependencies (rather than indirect)
     projectContext.projectConstraintsFile.eachConstraint(function (constraint) {
       topLevelPkgSet[constraint.package] = true;
-    });
-
-    var releaseConstrainedPkgSet = {}; // pinned core packages (to skip)
-    _.each(releaseRecordForConstraints.packages, function (v, packageName) {
-      releaseConstrainedPkgSet[packageName] = true;
     });
 
     var nonlatestDirectDeps = [];
